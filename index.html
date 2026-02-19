@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Battaglia Navale — © Girolamo Artale</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh;overflow:hidden;font-family:'Press Start 2P',monospace}
+canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;cursor:crosshair}
+#gameCanvas{max-width:100vw;max-height:100vh}
+#roomInput{position:fixed;top:-200px;left:-200px;opacity:0;font-size:24px;width:120px;text-align:center;font-family:'Press Start 2P',monospace}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<input id="roomInput" maxlength="4" autocomplete="off" />
+<script src="/socket.io/socket.io.js"></script>
+<script>
+// ============================================================
+// BATTAGLIA NAVALE — © Girolamo Artale
+// Single Player + Multiplayer via WebSocket
+// ============================================================
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const roomInputEl = document.getElementById('roomInput');
+
+const BASE_W=800, BASE_H=600;
+let scale=1;
+function resize(){
+  scale=Math.min(window.innerWidth/BASE_W,window.innerHeight/BASE_H);
+  canvas.width=BASE_W*scale;canvas.height=BASE_H*scale;
+  ctx.setTransform(scale,0,0,scale,0,0);ctx.imageSmoothingEnabled=false;
+}
+window.addEventListener('resize',resize);resize();
+
+// --- PALETTE ---
+const C={
+  black:'#000000',darkNavy:'#080c1e',navy:'#0c1430',darkBlue:'#101c3c',
+  medBlue:'#142448',blue:'#1a3058',brightBlue:'#203c68',skyBlue:'#2a4878',
+  lightBlue:'#345888',paleBlue:'#6888a8',cyan:'#38a0a0',teal:'#1a7878',
+  steel0:'#282838',steel1:'#383848',steel2:'#484860',steel3:'#606078',
+  steel4:'#787890',steel5:'#9898a8',steel6:'#b0b0c0',steel7:'#d0d0d8',
+  white:'#e8e8f0',
+  darkRed:'#601010',red:'#c02020',brightRed:'#f03030',
+  orange:'#e07020',yellow:'#e8c020',brightYellow:'#f8f060',
+  darkGreen:'#104818',green:'#20a030',lightGreen:'#50d850',
+  copper1:'#884400',copper2:'#aa6600',copper3:'#cc8800',
+};
+
+// --- SHIP SPRITES (procedural) ---
+const CELL=26;
+const SHIP_DEFS=[
+  {name:'Portaerei',size:5},{name:'Corazzata',size:4},{name:'Incrociatore',size:3},
+  {name:'Sottomarino',size:3},{name:'Cacciatorpediniere',size:2},
+];
+const shipCanvases={h:[],v:[],h_sunk:[],v_sunk:[]};
+
+function px(cx,x,y,w,h,color){cx.fillStyle=color;cx.fillRect(x,y,w,h);}
+function drawCarrier(cx,W,H){const m=H/2;px(cx,8,m-8,W-16,16,'#303040');px(cx,6,m-7,W-12,14,'#484860');px(cx,8,m-7,W-16,3,'#585870');px(cx,4,m-6,W-8,12,'#505868');px(cx,6,m-5,W-12,10,'#606878');for(let i=10;i<W-10;i+=8)px(cx,i,m-1,4,2,'#788090');px(cx,10,m,W-20,1,'#888898');const ix=W*0.65;px(cx,ix,m-10,10,8,'#404858');px(cx,ix+1,m-12,8,4,'#506070');px(cx,ix+2,m-14,4,3,'#607080');px(cx,ix+3,m-15,2,2,'#90a0a8');px(cx,ix+2,m-9,2,2,'#e8e020');px(cx,ix+5,m-9,2,2,'#e8e020');px(cx,2,m-4,4,8,'#586070');px(cx,0,m-2,3,4,'#687080');px(cx,W-4,m-4,4,8,'#485060');for(let a=0;a<3;a++){const ax=16+a*28;px(cx,ax,m-4,6,2,'#708090');px(cx,ax+2,m-5,2,1,'#8090a0');}px(cx,6,m+6,W-12,2,'#283040');}
+function drawBattleship(cx,W,H){const m=H/2;px(cx,6,m-6,W-12,12,'#384858');px(cx,4,m-5,W-8,10,'#486070');px(cx,6,m-5,W-12,3,'#587080');px(cx,8,m-4,W-16,8,'#506878');const sx=W*0.4;px(cx,sx,m-9,16,6,'#405868');px(cx,sx+2,m-12,12,4,'#506878');px(cx,sx+4,m-14,6,3,'#607888');px(cx,sx+6,m-16,2,3,'#8898a0');px(cx,sx+14,m-11,6,5,'#404050');px(cx,sx+15,m-13,4,3,'#383848');px(cx,10,m-7,10,4,'#405060');px(cx,12,m-8,6,2,'#506878');px(cx,8,m-6,4,2,'#607080');px(cx,24,m-7,10,4,'#405060');px(cx,26,m-8,6,2,'#506878');px(cx,22,m-6,4,2,'#607080');const at=W-24;px(cx,at,m-7,10,4,'#405060');px(cx,at+2,m-8,6,2,'#506878');px(cx,at+6,m-6,4,2,'#607080');px(cx,2,m-3,5,6,'#587080');px(cx,0,m-1,3,2,'#688090');px(cx,W-4,m-3,4,6,'#485868');px(cx,sx+4,m-10,2,2,'#e0d020');px(cx,sx+8,m-10,2,2,'#e0d020');px(cx,4,m+4,W-8,2,'#283848');}
+function drawCruiser(cx,W,H){const m=H/2;px(cx,4,m-5,W-8,10,'#486878');px(cx,6,m-5,W-12,2,'#588090');px(cx,6,m-3,W-12,6,'#507080');const bx=W*0.35;px(cx,bx,m-8,12,5,'#406070');px(cx,bx+2,m-11,8,4,'#507888');px(cx,bx+3,m-13,4,3,'#6090a0');px(cx,bx+4,m-15,2,3,'#8098a0');px(cx,8,m-6,8,3,'#406070');px(cx,6,m-5,4,2,'#5080a0');px(cx,W-16,m-6,8,3,'#406070');px(cx,W-10,m-5,4,2,'#5080a0');px(cx,bx+14,m-9,5,5,'#384858');px(cx,1,m-2,4,4,'#5888a0');px(cx,0,m-1,2,2,'#68a0b0');px(cx,W-3,m-2,3,4,'#486878');px(cx,bx+3,m-9,2,2,'#f0e830');px(cx,bx+7,m-9,2,2,'#f0e830');px(cx,4,m+4,W-8,2,'#284050');}
+function drawSubmarine(cx,W,H){const m=H/2;px(cx,6,m-4,W-12,8,'#1a5030');px(cx,4,m-3,W-8,6,'#206838');px(cx,8,m-4,W-16,2,'#288040');px(cx,2,m-2,4,4,'#288840');px(cx,0,m-1,3,2,'#309848');px(cx,W-4,m-2,4,4,'#1a5030');px(cx,W-2,m-1,2,2,'#184828');const tx=W*0.38;px(cx,tx,m-8,10,5,'#185838');px(cx,tx+1,m-10,8,3,'#207040');px(cx,tx+4,m-14,2,5,'#607060');px(cx,tx+3,m-15,4,2,'#708070');px(cx,14,m-1,2,2,'#e0d020');px(cx,W-16,m-1,2,2,'#e0d020');px(cx,0,m,4,1,'#103018');px(cx,W-2,m-2,2,1,'#486850');px(cx,W-2,m+1,2,1,'#486850');px(cx,8,m+2,W-16,1,'#184828');px(cx,4,m+3,W-8,1,'#103018');}
+function drawDestroyer(cx,W,H){const m=H/2;px(cx,4,m-4,W-8,8,'#203858');px(cx,6,m-4,W-12,2,'#284870');px(cx,6,m-2,W-12,4,'#285068');const bx=W*0.35;px(cx,bx,m-7,8,4,'#2a4060');px(cx,bx+1,m-9,6,3,'#305878');px(cx,bx+2,m-11,3,3,'#507888');px(cx,bx+3,m-13,1,3,'#6080a0');px(cx,6,m-5,6,2,'#304868');px(cx,4,m-4,4,1,'#4070a0');px(cx,W-12,m-5,6,2,'#304868');px(cx,1,m-2,4,4,'#3060a0');px(cx,0,m-1,2,2,'#4070b0');px(cx,W-3,m-2,3,4,'#203050');px(cx,bx+2,m-7,2,2,'#e0d020');px(cx,4,m+3,W-8,1,'#182840');}
+
+function generateShipSprites(){
+  const fns=[drawCarrier,drawBattleship,drawCruiser,drawSubmarine,drawDestroyer];
+  for(let si=0;si<5;si++){
+    const w=SHIP_DEFS[si].size*CELL,h=CELL;
+    // Horizontal
+    let c=document.createElement('canvas');c.width=w;c.height=h;let cx=c.getContext('2d');cx.imageSmoothingEnabled=false;fns[si](cx,w,h);shipCanvases.h[si]=c;
+    // Vertical
+    let vc=document.createElement('canvas');vc.width=h;vc.height=w;let vcx=vc.getContext('2d');vcx.imageSmoothingEnabled=false;vcx.translate(h,0);vcx.rotate(Math.PI/2);vcx.drawImage(shipCanvases.h[si],0,0);shipCanvases.v[si]=vc;
+    // Sunk h
+    c=document.createElement('canvas');c.width=w;c.height=h;cx=c.getContext('2d');cx.imageSmoothingEnabled=false;fns[si](cx,w,h);cx.globalCompositeOperation='source-atop';cx.fillStyle='#40202080';cx.fillRect(0,0,w,h);shipCanvases.h_sunk[si]=c;
+    // Sunk v
+    vc=document.createElement('canvas');vc.width=h;vc.height=w;vcx=vc.getContext('2d');vcx.imageSmoothingEnabled=false;vcx.translate(h,0);vcx.rotate(Math.PI/2);vcx.drawImage(shipCanvases.h_sunk[si],0,0);shipCanvases.v_sunk[si]=vc;
+  }
+}
+generateShipSprites();
+
+// --- GAME STATE ---
+const S={TITLE:0,MENU:1,DIFFICULTY:2,PLACEMENT:3,BATTLE:4,GAMEOVER:5,CONNECT:6,MP_WAIT:7};
+let scene=S.TITLE;
+let titleTimer=0,titleBlink=0,menuSelection=0,difficultySelection=1,gameOverTimer=0;
+
+let gameMode='single'; // 'single' or 'multi'
+let playerBoard,cpuBoard,playerShips,cpuShips;
+let currentTurn,gameMessage='',messageTimer=0;
+let gameOver=false,winner='';
+let stats={playerShots:0,playerHits:0,cpuShots:0,cpuHits:0,turns:0};
+
+let placementShipIndex=0,placementHorizontal=true,placementConfirmed=false,placedShips=[];
+let aiDifficulty=1,aiMode='hunt',aiTargetStack=[],aiHitChain=[];
+let mouseX=0,mouseY=0;
+let animFrame=0;
+let explosions=[],splashes=[];
+let shakeTimer=0,shakeX=0,shakeY=0;
+let cpuThinking=false,cpuThinkTimer=0;
+
+const GO_Y=90,PG_X=20,AG_X=425,LBL=18;
+
+// --- MULTIPLAYER STATE ---
+let socket=null;
+let mpPlayerId=-1; // 0 or 1
+let mpRoomCode='';
+let mpOpponentName='';
+let mpConnectMode='create'; // 'create' or 'join'
+let mpConnectSel=0;
+let mpStatus='';
+let mpInputCode='';
+let mpInputActive=false;
+let mpMyTurn=false;
+let mpWaitingShips=false;
+let mpRevealedShips=null; // opponent ships after game over
+let mpRematchSent=false;
+
+// --- AUDIO ---
+let audioCtx=null;
+function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();}
+function playTone(f,d,t='square',v=0.06){if(!audioCtx)return;const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type=t;o.frequency.value=f;g.gain.setValueAtTime(v,audioCtx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+d);}
+function sfxClick(){playTone(880,0.04,'square',0.05);}
+function sfxPlace(){playTone(660,0.06,'square',0.05);setTimeout(()=>playTone(990,0.08,'square',0.04),40);}
+function sfxSplash(){playTone(180,0.3,'triangle',0.06);playTone(120,0.4,'sine',0.04);}
+function sfxHit(){playTone(90,0.12,'sawtooth',0.1);setTimeout(()=>playTone(70,0.18,'square',0.07),40);}
+function sfxSunk(){playTone(50,0.4,'sawtooth',0.1);setTimeout(()=>playTone(35,0.5,'triangle',0.08),80);setTimeout(()=>playTone(25,0.6,'sine',0.06),200);}
+function sfxVictory(){[523,659,784,1047].forEach((f,i)=>setTimeout(()=>playTone(f,0.3,'square',0.05),i*120));}
+function sfxDefeat(){[380,330,280,180].forEach((f,i)=>setTimeout(()=>playTone(f,0.4,'triangle',0.04),i*180));}
+function sfxError(){playTone(120,0.12,'square',0.05);}
+
+// --- BOARD LOGIC ---
+function createBoard(){return Array.from({length:10},()=>Array.from({length:10},()=>({ship:null,hit:false})));}
+function canPlace(b,r,c,sz,h){for(let i=0;i<sz;i++){const rr=h?r:r+i,cc=h?c+i:c;if(rr<0||rr>=10||cc<0||cc>=10||b[rr][cc].ship!==null)return false;}return true;}
+function placeShip(b,r,c,sz,h,si){const cells=[];for(let i=0;i<sz;i++){const rr=h?r:r+i,cc=h?c+i:c;b[rr][cc].ship=si;cells.push({r:rr,c:cc});}return cells;}
+function removeShip(b,si){for(let r=0;r<10;r++)for(let c=0;c<10;c++)if(b[r][c].ship===si)b[r][c].ship=null;}
+function randomPlacement(b){const ships=[];for(let si=0;si<5;si++){let p=false,a=0;while(!p&&a<1000){const h=Math.random()<0.5,r=Math.floor(Math.random()*10),c=Math.floor(Math.random()*10);if(canPlace(b,r,c,SHIP_DEFS[si].size,h)){const cells=placeShip(b,r,c,SHIP_DEFS[si].size,h,si);ships.push({...SHIP_DEFS[si],cells,horizontal:h,hits:0});p=true;}a++;}}return ships;}
+function allSunk(ships){return ships.every(s=>s.hits>=s.size);}
+function fireAt(b,ships,r,c){if(b[r][c].hit)return null;b[r][c].hit=true;const si=b[r][c].ship;if(si!==null){ships[si].hits++;if(ships[si].hits>=ships[si].size)return{result:'sunk',shipIndex:si,shipName:ships[si].name};return{result:'hit'};}return{result:'miss'};}
+
+// --- CPU AI ---
+function cpuFire(){
+  if(aiDifficulty===0){let r,c;do{r=Math.floor(Math.random()*10);c=Math.floor(Math.random()*10);}while(playerBoard[r][c].hit);return{row:r,col:c};}
+  if(aiMode==='target'&&aiTargetStack.length>0){while(aiTargetStack.length>0){const t=aiTargetStack.pop();if(t.r>=0&&t.r<10&&t.c>=0&&t.c<10&&!playerBoard[t.r][t.c].hit)return{row:t.r,col:t.c};}aiMode='hunt';aiHitChain=[];}
+  if(aiDifficulty===2)return cpuFireHard();
+  let r,c,a=0;do{r=Math.floor(Math.random()*10);c=Math.floor(Math.random()*10);if(a<200&&(r+c)%2!==0){a++;continue;}if(!playerBoard[r][c].hit)break;a++;}while(a<500);
+  if(playerBoard[r][c].hit){for(let rr=0;rr<10;rr++)for(let cc=0;cc<10;cc++)if(!playerBoard[rr][cc].hit)return{row:rr,col:cc};}return{row:r,col:c};
+}
+function cpuFireHard(){const prob=Array.from({length:10},()=>Array(10).fill(0));const sizes=playerShips.filter(s=>s.hits<s.size).map(s=>s.size);for(const sz of sizes){for(let r=0;r<10;r++)for(let c=0;c<=10-sz;c++){let ok=true,unk=false;for(let i=0;i<sz;i++){if(playerBoard[r][c+i].hit&&playerBoard[r][c+i].ship===null){ok=false;break;}if(!playerBoard[r][c+i].hit)unk=true;}if(ok&&unk)for(let i=0;i<sz;i++)if(!playerBoard[r][c+i].hit)prob[r][c+i]++;}for(let r=0;r<=10-sz;r++)for(let c=0;c<10;c++){let ok=true,unk=false;for(let i=0;i<sz;i++){if(playerBoard[r+i][c].hit&&playerBoard[r+i][c].ship===null){ok=false;break;}if(!playerBoard[r+i][c].hit)unk=true;}if(ok&&unk)for(let i=0;i<sz;i++)if(!playerBoard[r+i][c].hit)prob[r+i][c]++;}}let mx=0,best=[];for(let r=0;r<10;r++)for(let c=0;c<10;c++){if(playerBoard[r][c].hit)continue;if(prob[r][c]>mx){mx=prob[r][c];best=[{r,c}];}else if(prob[r][c]===mx)best.push({r,c});}if(!best.length){for(let r=0;r<10;r++)for(let c=0;c<10;c++)if(!playerBoard[r][c].hit)return{row:r,col:c};}const p=best[Math.floor(Math.random()*best.length)];return{row:p.r,col:p.c};}
+function cpuProcessResult(row,col,result){if(result.result==='hit'){aiMode='target';aiHitChain.push({r:row,c:col});if(aiHitChain.length>=2){const dr=aiHitChain[aiHitChain.length-1].r-aiHitChain[aiHitChain.length-2].r,dc=aiHitChain[aiHitChain.length-1].c-aiHitChain[aiHitChain.length-2].c;aiTargetStack=[];let fr=row+dr,fc=col+dc;if(fr>=0&&fr<10&&fc>=0&&fc<10&&!playerBoard[fr][fc].hit)aiTargetStack.push({r:fr,c:fc});let br=aiHitChain[0].r-dr,bc=aiHitChain[0].c-dc;if(br>=0&&br<10&&bc>=0&&bc<10&&!playerBoard[br][bc].hit)aiTargetStack.push({r:br,c:bc});}else{[[-1,0],[1,0],[0,-1],[0,1]].forEach(([dr,dc])=>{const nr=row+dr,nc=col+dc;if(nr>=0&&nr<10&&nc>=0&&nc<10&&!playerBoard[nr][nc].hit)aiTargetStack.push({r:nr,c:nc});});}}else if(result.result==='sunk'){aiMode='hunt';aiTargetStack=[];aiHitChain=[];}}
+
+// --- WATER ---
+const waterFrames=[];
+(function(){for(let f=0;f<8;f++){const c=document.createElement('canvas');c.width=64;c.height=64;const cx=c.getContext('2d');for(let y=0;y<64;y+=2)for(let x=0;x<64;x+=2){const w=Math.sin((x+f*6)*0.1)*Math.cos((y+f*4)*0.08)+Math.sin((x+y+f*3)*0.06)*0.4;cx.fillStyle=w>0.5?C.brightBlue:w>0.2?C.blue:w>-0.1?C.medBlue:w>-0.4?C.darkBlue:C.navy;cx.fillRect(x,y,2,2);}waterFrames.push(c);}})();
+
+// --- DRAWING HELPERS ---
+function drawCopperBars(y,h){[C.copper1,C.copper2,C.copper3,C.copper2,C.copper1].forEach((col,i,a)=>{ctx.fillStyle=col;ctx.fillRect(0,y+i*Math.ceil(h/a.length),BASE_W,Math.ceil(h/a.length));});}
+function drawScanlines(){ctx.fillStyle='#00000012';for(let y=0;y<BASE_H;y+=3)ctx.fillRect(0,y,BASE_W,1);}
+function drawSeaBg(){const frame=waterFrames[Math.floor(animFrame/12)%8];for(let y=0;y<BASE_H;y+=64)for(let x=0;x<BASE_W;x+=64)ctx.drawImage(frame,x,y,64,64);const g=ctx.createLinearGradient(0,0,0,BASE_H);g.addColorStop(0,'#00000080');g.addColorStop(0.3,'#00000020');g.addColorStop(0.7,'#00000020');g.addColorStop(1,'#000000a0');ctx.fillStyle=g;ctx.fillRect(0,0,BASE_W,BASE_H);}
+function drawAmigaBtn(x,y,w,h,text,active){if(active){ctx.fillStyle=C.steel2;ctx.fillRect(x,y,w,h);ctx.fillStyle=C.steel5;ctx.fillRect(x,y,w,2);ctx.fillRect(x,y,2,h);ctx.fillStyle=C.steel0;ctx.fillRect(x,y+h-2,w,2);ctx.fillRect(x+w-2,y,2,h);}else{ctx.fillStyle=C.steel1;ctx.fillRect(x,y,w,h);}ctx.font='8px "Press Start 2P"';ctx.textAlign='center';ctx.fillStyle=active?C.white:C.steel3;ctx.fillText(text,x+w/2,y+h/2+3);}
+
+function drawHitX(x,y){ctx.strokeStyle=C.darkRed;ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(x+4,y+4);ctx.lineTo(x+CELL-4,y+CELL-4);ctx.stroke();ctx.beginPath();ctx.moveTo(x+CELL-4,y+4);ctx.lineTo(x+4,y+CELL-4);ctx.stroke();ctx.strokeStyle=C.brightRed;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x+5,y+5);ctx.lineTo(x+CELL-5,y+CELL-5);ctx.stroke();ctx.beginPath();ctx.moveTo(x+CELL-5,y+5);ctx.lineTo(x+5,y+CELL-5);ctx.stroke();}
+function getGridCell(mx,my,ox,oy){const col=Math.floor((mx-ox-LBL)/CELL),row=Math.floor((my-oy-LBL)/CELL);return(row>=0&&row<10&&col>=0&&col<10)?{row,col}:null;}
+
+function drawGrid(ox,oy,board,showShips,isAttackGrid){
+  const gx=ox+LBL,gy=oy+LBL;
+  const frame=waterFrames[Math.floor(animFrame/10)%8];
+  for(let ty=0;ty<10*CELL;ty+=64)for(let tx=0;tx<10*CELL;tx+=64)ctx.drawImage(frame,gx+tx,gy+ty,64,64);
+  ctx.fillStyle=C.black;ctx.fillRect(gx+10*CELL,gy,64,10*CELL+64);ctx.fillRect(gx,gy+10*CELL,10*CELL+64,64);
+
+  // Ships
+  if(showShips&&board){
+    const shipCells={};
+    for(let r=0;r<10;r++)for(let c=0;c<10;c++){const si=board[r][c].ship;if(si!==null){if(!shipCells[si])shipCells[si]=[];shipCells[si].push({r,c});}}
+    for(const siStr in shipCells){const si=parseInt(siStr);const cells=shipCells[si];
+      const ships=showShips==='player'?playerShips:cpuShips;const ship=ships?ships[si]:null;if(!ship)continue;
+      const sunk=ship.hits>=ship.size;let minR=10,minC=10;cells.forEach(({r,c})=>{minR=Math.min(minR,r);minC=Math.min(minC,c);});
+      const key=sunk?(ship.horizontal?'h_sunk':'v_sunk'):(ship.horizontal?'h':'v');
+      const sprite=shipCanvases[key][si];if(!sprite)continue;
+      const cw=ship.horizontal?ship.size*CELL:CELL,ch=ship.horizontal?CELL:ship.size*CELL;
+      if(sunk)ctx.globalAlpha=0.5;ctx.drawImage(sprite,gx+minC*CELL+(cw-sprite.width)/2,gy+minR*CELL+(ch-sprite.height)/2);if(sunk)ctx.globalAlpha=1;
+    }
+  }
+
+  // Hits/misses
+  for(let r=0;r<10;r++)for(let c=0;c<10;c++){if(!board||!board[r][c].hit)continue;
+    if(board[r][c].ship!==null){drawHitX(gx+c*CELL,gy+r*CELL);const ft=(animFrame+r*7+c*3)%30;if(ft<15){ctx.globalAlpha=0.4;ctx.fillStyle=ft<8?C.orange:C.yellow;ctx.fillRect(gx+c*CELL+8+Math.sin(animFrame*0.2+c)*3,gy+r*CELL+2-ft*0.3,4,4);ctx.fillStyle='#60606080';ctx.fillRect(gx+c*CELL+12+Math.cos(animFrame*0.15+r)*2,gy+r*CELL-ft*0.5,6,4);ctx.globalAlpha=1;}}
+    else{const cx_=gx+c*CELL+CELL/2,cy_=gy+r*CELL+CELL/2;ctx.fillStyle=C.paleBlue;ctx.fillRect(cx_-3,cy_-3,2,2);ctx.fillRect(cx_+1,cy_-3,2,2);ctx.fillRect(cx_-3,cy_+1,2,2);ctx.fillRect(cx_+1,cy_+1,2,2);ctx.fillStyle=C.white;ctx.fillRect(cx_-1,cy_-1,2,2);}
+  }
+
+  ctx.strokeStyle='#1848a040';ctx.lineWidth=1;
+  for(let i=0;i<=10;i++){ctx.beginPath();ctx.moveTo(gx+i*CELL,gy);ctx.lineTo(gx+i*CELL,gy+10*CELL);ctx.stroke();ctx.beginPath();ctx.moveTo(gx,gy+i*CELL);ctx.lineTo(gx+10*CELL,gy+i*CELL);ctx.stroke();}
+  ctx.strokeStyle=C.skyBlue;ctx.lineWidth=2;ctx.strokeRect(gx,gy,10*CELL,10*CELL);
+  ctx.fillStyle=C.cyan;ctx.font='8px "Press Start 2P"';ctx.textAlign='center';
+  for(let c=0;c<10;c++)ctx.fillText('ABCDEFGHIJ'[c],gx+c*CELL+CELL/2,oy+14);
+  ctx.textAlign='right';for(let r=0;r<10;r++)ctx.fillText(''+(r+1),gx-4,gy+r*CELL+CELL/2+3);
+
+  // Hover
+  const canShoot=(gameMode==='single')?(currentTurn==='player'&&!cpuThinking):mpMyTurn;
+  if(isAttackGrid&&canShoot&&!gameOver&&scene===S.BATTLE){
+    const hc=getGridCell(mouseX,mouseY,ox,oy);if(hc){const hx=gx+hc.col*CELL,hy=gy+hc.row*CELL;const hit=board[hc.row][hc.col].hit;const pulse=Math.sin(animFrame*0.2)*0.3+0.7;ctx.globalAlpha=pulse;ctx.strokeStyle=hit?C.brightRed:C.lightGreen;ctx.lineWidth=2;ctx.strokeRect(hx+2,hy+2,CELL-4,CELL-4);const chx=hx+CELL/2,chy=hy+CELL/2;ctx.beginPath();ctx.moveTo(chx-12,chy);ctx.lineTo(chx-4,chy);ctx.moveTo(chx+4,chy);ctx.lineTo(chx+12,chy);ctx.moveTo(chx,chy-12);ctx.lineTo(chx,chy-4);ctx.moveTo(chx,chy+4);ctx.lineTo(chx,chy+12);ctx.stroke();ctx.globalAlpha=1;}
+  }
+}
+
+// --- ANIMATIONS ---
+function addExplosion(ox,oy,r,c){explosions.push({x:ox+LBL+c*CELL+CELL/2,y:oy+LBL+r*CELL+CELL/2,frame:0,max:24});shakeTimer=10;}
+function addSplash(ox,oy,r,c){splashes.push({x:ox+LBL+c*CELL+CELL/2,y:oy+LBL+r*CELL+CELL/2,frame:0,max:18});}
+function drawExplosions(){for(let i=explosions.length-1;i>=0;i--){const e=explosions[i],t=e.frame/e.max;if(e.frame<4){ctx.fillStyle=C.white;ctx.fillRect(e.x-14,e.y-14,28,28);}ctx.globalAlpha=1-t;[C.brightYellow,C.yellow,C.orange,C.red,C.darkRed].forEach((col,idx)=>{const r=4+t*18*(1-idx*0.15);if(r>0){ctx.fillStyle=col;for(let a=0;a<8;a++){const ang=(a/8)*Math.PI*2+e.frame*0.2;ctx.fillRect(e.x+Math.cos(ang)*r-2,e.y+Math.sin(ang)*r-2,4,4);}}});for(let d=0;d<6;d++){const ang=(d/6)*Math.PI*2+e.frame*0.1,dist=t*20+d*2;ctx.fillStyle=d%2?C.orange:C.yellow;ctx.fillRect(e.x+Math.cos(ang)*dist-1,e.y+Math.sin(ang)*dist-t*10-1,2,2);}ctx.globalAlpha=1;e.frame++;if(e.frame>=e.max)explosions.splice(i,1);}}
+function drawSplashes(){for(let i=splashes.length-1;i>=0;i--){const s=splashes[i],t=s.frame/s.max;ctx.globalAlpha=1-t;for(let ring=0;ring<3;ring++){ctx.strokeStyle=ring===0?C.white:C.paleBlue;ctx.lineWidth=2;ctx.beginPath();ctx.arc(s.x,s.y,3+t*16+ring*5,0,Math.PI*2);ctx.stroke();}if(s.frame<10)for(let d=0;d<6;d++){const ang=(d/6)*Math.PI*2;ctx.fillStyle=d%2?C.lightBlue:C.white;ctx.fillRect(s.x+Math.cos(ang)*t*14-1,s.y+Math.sin(ang)*t*14-Math.sin(t*Math.PI)*12-1,2,2);}ctx.globalAlpha=1;s.frame++;if(s.frame>=s.max)splashes.splice(i,1);}}
+
+// ============================================================
+// SCENES
+// ============================================================
+
+// --- TITLE ---
+function drawTitle(){
+  drawSeaBg();drawCopperBars(140,20);
+  const title='BATTAGLIA NAVALE';ctx.font='22px "Press Start 2P"';ctx.textAlign='center';
+  for(let i=0;i<title.length;i++){const wave=Math.sin(titleTimer*0.04+i*0.35)*8;const alpha=Math.min(1,titleTimer*0.025-i*0.04);if(alpha<=0)continue;ctx.globalAlpha=alpha;const x=BASE_W/2-155+i*20,y=155+wave;ctx.fillStyle=C.black;ctx.fillText(title[i],x+3,y+3);ctx.fillStyle=C.copper3;ctx.fillText(title[i],x+1,y+1);ctx.fillStyle=C.white;ctx.fillText(title[i],x,y);}ctx.globalAlpha=1;
+  drawCopperBars(170,12);
+  if(titleTimer>35){ctx.font='8px "Press Start 2P"';ctx.fillStyle=C.copper3;ctx.fillText('© Girolamo Artale',BASE_W/2,200);}
+  if(titleTimer>45){const t=titleTimer-45;[{si:0,sp:1.2,y:310},{si:4,sp:-1.5,y:345,sx:BASE_W+50},{si:3,sp:0.8,y:375,a:0.7}].forEach(s=>{const sx=s.sx!==undefined?s.sx+t*s.sp:-100+t*s.sp;if(sx>-200&&sx<BASE_W+200){ctx.globalAlpha=s.a||1;ctx.drawImage(shipCanvases.h[s.si],sx,s.y+Math.sin(t*0.04+s.si)*3);ctx.globalAlpha=1;}});}
+  titleBlink=(titleBlink+1)%50;
+  if(titleTimer>55&&titleBlink<32){ctx.font='10px "Press Start 2P"';ctx.fillStyle=C.brightYellow;ctx.fillText('CLICCA PER INIZIARE',BASE_W/2,460);}
+  drawScanlines();titleTimer++;
+}
+
+// --- MENU ---
+function drawMenu(){
+  drawSeaBg();drawCopperBars(70,14);
+  ctx.font='18px "Press Start 2P"';ctx.textAlign='center';ctx.fillStyle=C.black;ctx.fillText('BATTAGLIA NAVALE',BASE_W/2+2,86);ctx.fillStyle=C.white;ctx.fillText('BATTAGLIA NAVALE',BASE_W/2,84);drawCopperBars(92,10);
+  const items=['GIOCATORE SINGOLO','DUE GIOCATORI'];
+  ctx.font='11px "Press Start 2P"';
+  for(let i=0;i<items.length;i++){const y=240+i*60,sel=menuSelection===i;
+    if(sel){ctx.fillStyle=C.navy+'80';ctx.fillRect(BASE_W/2-170,y-15,340,28);ctx.strokeStyle=C.copper3;ctx.lineWidth=2;ctx.strokeRect(BASE_W/2-170,y-15,340,28);ctx.fillStyle=C.brightYellow;ctx.font='11px "Press Start 2P"';ctx.fillText('▶',BASE_W/2-160+Math.sin(animFrame*0.12)*4,y+2);}
+    ctx.font='11px "Press Start 2P"';ctx.fillStyle=sel?C.white:C.steel5;ctx.fillText(items[i],BASE_W/2+10,y+2);}
+  ctx.font='7px "Press Start 2P"';ctx.fillStyle=C.copper2;ctx.fillText('© Girolamo Artale',BASE_W/2,555);drawScanlines();
+}
+
+// --- DIFFICULTY ---
+function drawDifficulty(){
+  drawSeaBg();drawCopperBars(90,14);ctx.font='14px "Press Start 2P"';ctx.textAlign='center';ctx.fillStyle=C.black;ctx.fillText('SCEGLI DIFFICOLTÀ',BASE_W/2+2,104);ctx.fillStyle=C.white;ctx.fillText('SCEGLI DIFFICOLTÀ',BASE_W/2,102);drawCopperBars(108,10);
+  [{n:'FACILE',d:'La CPU spara a caso',c:C.green},{n:'MEDIO',d:'La CPU cerca le navi colpite',c:C.yellow},{n:'DIFFICILE',d:'La CPU usa strategie avanzate',c:C.brightRed}].forEach((item,i)=>{const y=220+i*80,sel=difficultySelection===i;if(sel){ctx.fillStyle=C.navy+'80';ctx.fillRect(BASE_W/2-180,y-18,360,50);ctx.strokeStyle=item.c;ctx.lineWidth=2;ctx.strokeRect(BASE_W/2-180,y-18,360,50);ctx.fillStyle=item.c;ctx.font='12px "Press Start 2P"';ctx.fillText('▶',BASE_W/2-160+Math.sin(animFrame*0.12)*4,y+2);}ctx.font='12px "Press Start 2P"';ctx.fillStyle=sel?C.white:C.steel5;ctx.fillText(item.n,BASE_W/2+10,y+2);ctx.font='7px "Press Start 2P"';ctx.fillStyle=sel?C.paleBlue:C.steel3;ctx.fillText(item.d,BASE_W/2+10,y+22);});drawScanlines();
+}
+
+// --- CONNECT (Multiplayer) ---
+function drawConnect(){
+  drawSeaBg();drawCopperBars(60,14);
+  ctx.font='14px "Press Start 2P"';ctx.textAlign='center';ctx.fillStyle=C.white;ctx.fillText('PARTITA IN RETE',BASE_W/2,76);drawCopperBars(82,10);
+
+  // Two options
+  const opts=[{n:'CREA PARTITA',d:'Crea una stanza e attendi un amico'},{n:'ENTRA IN PARTITA',d:'Inserisci il codice stanza'}];
+  for(let i=0;i<2;i++){const y=180+i*90,sel=mpConnectSel===i;
+    if(sel){ctx.fillStyle=C.navy+'80';ctx.fillRect(BASE_W/2-200,y-18,400,55);ctx.strokeStyle=C.copper3;ctx.lineWidth=2;ctx.strokeRect(BASE_W/2-200,y-18,400,55);ctx.fillStyle=C.brightYellow;ctx.font='11px "Press Start 2P"';ctx.fillText('▶',BASE_W/2-190+Math.sin(animFrame*0.12)*4,y+2);}
+    ctx.font='11px "Press Start 2P"';ctx.fillStyle=sel?C.white:C.steel5;ctx.fillText(opts[i].n,BASE_W/2+10,y+2);
+    ctx.font='7px "Press Start 2P"';ctx.fillStyle=sel?C.paleBlue:C.steel3;ctx.fillText(opts[i].d,BASE_W/2+10,y+22);
+  }
+
+  // If joining, show code input
+  if(mpConnectSel===1){
+    ctx.font='9px "Press Start 2P"';ctx.fillStyle=C.copper3;ctx.fillText('CODICE STANZA:',BASE_W/2,400);
+    // Code display box
+    ctx.fillStyle=C.steel0;ctx.fillRect(BASE_W/2-60,410,120,36);ctx.strokeStyle=C.copper3;ctx.lineWidth=2;ctx.strokeRect(BASE_W/2-60,410,120,36);
+    ctx.font='18px "Press Start 2P"';ctx.fillStyle=C.brightYellow;
+    let display=mpInputCode;while(display.length<4)display+='_';
+    ctx.fillText(display,BASE_W/2,435);
+    if(mpInputCode.length===4){drawAmigaBtn(BASE_W/2-70,460,140,32,'CONNETTI',true);}
+  }
+
+  // Status
+  if(mpStatus){ctx.font='7px "Press Start 2P"';ctx.fillStyle=C.orange;ctx.fillText(mpStatus,BASE_W/2,530);}
+
+  // Back button
+  drawAmigaBtn(20,550,120,30,'← MENU',true);
+  drawScanlines();
+}
+
+// --- MP_WAIT ---
+function drawMpWait(){
+  drawSeaBg();drawCopperBars(120,14);
+  ctx.font='14px "Press Start 2P"';ctx.textAlign='center';ctx.fillStyle=C.white;ctx.fillText('STANZA CREATA',BASE_W/2,136);drawCopperBars(142,10);
+
+  ctx.font='9px "Press Start 2P"';ctx.fillStyle=C.copper3;ctx.fillText('CODICE STANZA:',BASE_W/2,240);
+
+  // Big room code
+  ctx.fillStyle=C.steel0;ctx.fillRect(BASE_W/2-80,255,160,50);ctx.strokeStyle=C.copper3;ctx.lineWidth=2;ctx.strokeRect(BASE_W/2-80,255,160,50);
+  ctx.font='28px "Press Start 2P"';ctx.fillStyle=C.brightYellow;ctx.fillText(mpRoomCode,BASE_W/2,290);
+
+  ctx.font='8px "Press Start 2P"';ctx.fillStyle=C.paleBlue;ctx.fillText('COMUNICA QUESTO CODICE AL TUO AMICO',BASE_W/2,340);
+
+  ctx.fillStyle=C.orange;const dots='.'.repeat((Math.floor(animFrame/15)%3)+1);
+  ctx.font='9px "Press Start 2P"';ctx.fillText('IN ATTESA DELL\'AVVERSARIO'+dots,BASE_W/2,420);
+
+  drawAmigaBtn(BASE_W/2-70,480,140,32,'ANNULLA',true);
+  drawScanlines();
+}
+
+// --- PLACEMENT (shared single+multi) ---
+function drawPlacement(){
+  ctx.fillStyle=C.darkNavy;ctx.fillRect(0,0,BASE_W,BASE_H);drawCopperBars(0,10);
+  ctx.font='10px "Press Start 2P"';ctx.textAlign='center';ctx.fillStyle=C.white;
+  ctx.fillText('POSIZIONA LE TUE NAVI',BASE_W/2,28);drawCopperBars(34,6);
+
+  const gox=20,goy=48;
+  drawGrid(gox,goy,playerBoard,'player',false);
+
+  const dockX=310,dockY=56;
+  ctx.fillStyle=C.navy+'c0';ctx.fillRect(dockX-8,dockY-8,490,240);ctx.strokeStyle=C.skyBlue;ctx.lineWidth=1;ctx.strokeRect(dockX-8,dockY-8,490,240);
+  ctx.font='8px "Press Start 2P"';ctx.textAlign='left';ctx.fillStyle=C.copper3;ctx.fillText('FLOTTA:',dockX,dockY+8);
+  for(let i=0;i<5;i++){const y=dockY+26+i*42,placed=placedShips[i]!==undefined,cur=i===placementShipIndex&&!placementConfirmed;
+    const prev=shipCanvases.h[i];if(prev){ctx.globalAlpha=placed?0.4:1;ctx.drawImage(prev,dockX+150,y-4);ctx.globalAlpha=1;}
+    ctx.font='7px "Press Start 2P"';ctx.fillStyle=cur?C.brightYellow:placed?C.darkGreen:C.steel5;ctx.fillText((placed?'✓ ':cur?'▶ ':'  ')+SHIP_DEFS[i].name,dockX,y+6);
+    ctx.fillStyle=C.steel3;ctx.font='6px "Press Start 2P"';ctx.fillText(SHIP_DEFS[i].size+' caselle',dockX+4,y+18);}
+
+  if(!placementConfirmed&&placementShipIndex<5){const cell=getGridCell(mouseX,mouseY,gox,goy);if(cell){const size=SHIP_DEFS[placementShipIndex].size;const valid=canPlace(playerBoard,cell.row,cell.col,size,placementHorizontal);const gx_=gox+LBL,gy_=goy+LBL;const ghost=placementHorizontal?shipCanvases.h[placementShipIndex]:shipCanvases.v[placementShipIndex];if(ghost){const cw=placementHorizontal?size*CELL:CELL,ch=placementHorizontal?CELL:size*CELL;ctx.globalAlpha=0.5;ctx.drawImage(ghost,gx_+cell.col*CELL+(cw-ghost.width)/2,gy_+cell.row*CELL+(ch-ghost.height)/2);ctx.globalAlpha=1;}for(let s=0;s<size;s++){const r=placementHorizontal?cell.row:cell.row+s,c=placementHorizontal?cell.col+s:cell.col;if(r<10&&c<10){ctx.strokeStyle=valid?C.lightGreen:C.brightRed;ctx.lineWidth=2;ctx.strokeRect(gx_+c*CELL+1,gy_+r*CELL+1,CELL-2,CELL-2);}}}}
+
+  ctx.font='7px "Press Start 2P"';ctx.textAlign='center';ctx.fillStyle=C.paleBlue;
+  if(!placementConfirmed){ctx.fillText('CLICCA SULLA GRIGLIA PER POSIZIONARE',BASE_W/2+120,320);ctx.fillText('[R] o TASTO DESTRO = RUOTA   [Z] = ANNULLA',BASE_W/2+120,338);}
+  if(!placementConfirmed&&placementShipIndex<5){ctx.fillStyle=C.brightYellow;ctx.fillText(placementHorizontal?'↔ ORIZZONTALE':'↕ VERTICALE',BASE_W/2+120,360);}
+
+  if(mpWaitingShips){ctx.fillStyle=C.orange;ctx.font='8px "Press Start 2P"';const dots='.'.repeat((Math.floor(animFrame/15)%3)+1);ctx.fillText('IN ATTESA DELL\'AVVERSARIO'+dots,BASE_W/2+120,400);}
+
+  const btnY=540;
+  drawAmigaBtn(310,btnY,190,32,'CASUALE',!placementConfirmed);
+  drawAmigaBtn(520,btnY,190,32,'CONFERMA',placementShipIndex>=5&&!placementConfirmed);
+  if(!placementConfirmed&&placementShipIndex<5)drawAmigaBtn(520,btnY-42,190,32,'RUOTA [R]',true);
+  drawScanlines();
+}
+
+// --- BATTLE ---
+function drawBattle(){
+  if(shakeTimer>0){shakeX=(Math.random()-0.5)*shakeTimer;shakeY=(Math.random()-0.5)*shakeTimer;shakeTimer--;}else{shakeX=0;shakeY=0;}
+  ctx.save();ctx.translate(shakeX,shakeY);
+  ctx.fillStyle=C.darkNavy;ctx.fillRect(-10,-10,BASE_W+20,BASE_H+20);drawCopperBars(0,8);
+
+  ctx.font='8px "Press Start 2P"';ctx.textAlign='left';ctx.fillStyle=C.cyan;
+  ctx.fillText(gameMode==='multi'?'TU':'AMMIRAGLIO',PG_X+LBL,22);
+  ctx.textAlign='right';ctx.fillStyle=C.brightRed;
+  ctx.fillText(gameMode==='multi'?mpOpponentName:'NEMICO',AG_X+LBL+10*CELL,22);
+
+  ctx.textAlign='center';ctx.font='9px "Press Start 2P"';
+  const isMyTurn=gameMode==='single'?(currentTurn==='player'):mpMyTurn;
+  if(gameOver){ctx.fillStyle=winner==='player'?C.lightGreen:C.brightRed;ctx.fillText(winner==='player'?'★ VITTORIA! ★':'✗ SCONFITTA ✗',BASE_W/2,50);}
+  else if(gameMode==='single'&&cpuThinking){ctx.fillStyle=C.orange;ctx.fillText('IL NEMICO PENSA'+'.'.repeat((Math.floor(animFrame/12)%3)+1),BASE_W/2,50);}
+  else{ctx.fillStyle=isMyTurn?C.lightGreen:C.orange;ctx.fillText(isMyTurn?'▶ IL TUO TURNO — SPARA!':'TURNO NEMICO',BASE_W/2,50);}
+
+  drawCopperBars(56,4);
+  ctx.font='7px "Press Start 2P"';ctx.textAlign='center';ctx.fillStyle=C.skyBlue;
+  ctx.fillText('LA TUA FLOTTA',PG_X+LBL+5*CELL,72);
+  ctx.fillText("GRIGLIA D'ATTACCO",AG_X+LBL+5*CELL,72);
+
+  drawGrid(PG_X,GO_Y-10,playerBoard,'player',false);
+  drawGrid(AG_X,GO_Y-10,cpuBoard,gameOver?'cpu':false,true);
+
+  // Fleet status
+  const sy=GO_Y+10*CELL+6;ctx.font='6px "Press Start 2P"';ctx.textAlign='left';
+  ctx.fillStyle=C.copper3;ctx.fillText('TUA FLOTTA:',PG_X,sy);
+  for(let i=0;i<playerShips.length;i++){const s=playerShips[i];if(!s)continue;const sunk=s.hits>=s.size;
+    const mini=shipCanvases.h[i];if(mini){ctx.globalAlpha=sunk?0.3:1;ctx.drawImage(mini,PG_X+70,sy+6+i*14);ctx.globalAlpha=1;}
+    ctx.fillStyle=sunk?C.brightRed:C.lightGreen;ctx.fillText(sunk?'✗':'●',PG_X,sy+12+i*14);ctx.fillStyle=sunk?C.steel3:C.steel5;ctx.fillText(s.name.substring(0,6),PG_X+12,sy+12+i*14);}
+
+  ctx.fillStyle=C.copper3;ctx.fillText('FLOTTA NEMICA:',AG_X,sy);
+  for(let i=0;i<cpuShips.length;i++){const s=cpuShips[i];const sunk=s.hits>=s.size;
+    if(sunk){const mini=shipCanvases.h_sunk[i];if(mini){ctx.globalAlpha=0.5;ctx.drawImage(mini,AG_X+70,sy+6+i*14);ctx.globalAlpha=1;}ctx.fillStyle=C.brightRed;ctx.fillText('✗',AG_X,sy+12+i*14);ctx.fillStyle=C.steel3;ctx.fillText(s.name.substring(0,6),AG_X+12,sy+12+i*14);}
+    else{ctx.fillStyle=C.steel3;ctx.fillText('? ? ? ? ?',AG_X+12,sy+12+i*14);}}
+
+  if(messageTimer>0){ctx.font='10px "Press Start 2P"';ctx.textAlign='center';ctx.globalAlpha=Math.min(1,messageTimer/10);const mc=gameMessage.includes('AFFONDATO')?C.brightRed:gameMessage.includes('COLPITO')?C.orange:C.paleBlue;ctx.fillStyle=C.black;ctx.fillText(gameMessage,BASE_W/2+2,BASE_H-14+2);ctx.fillStyle=mc;ctx.fillText(gameMessage,BASE_W/2,BASE_H-14);ctx.globalAlpha=1;messageTimer--;}
+  drawExplosions();drawSplashes();drawScanlines();ctx.restore();
+}
+
+// --- GAMEOVER ---
+function drawGameOver(){
+  drawBattle();ctx.fillStyle='rgba(0,0,0,0.75)';ctx.fillRect(0,0,BASE_W,BASE_H);gameOverTimer++;drawCopperBars(100,16);
+  ctx.font='20px "Press Start 2P"';ctx.textAlign='center';
+  if(winner==='player'){ctx.fillStyle=C.black;ctx.fillText('★ VITTORIA! ★',BASE_W/2+3,121);ctx.fillStyle=C.brightYellow;ctx.fillText('★ VITTORIA! ★',BASE_W/2,118);if(gameOverTimer%18===0)explosions.push({x:80+Math.random()*640,y:40+Math.random()*80,frame:0,max:25});}
+  else{ctx.fillStyle=C.black;ctx.fillText('SCONFITTA',BASE_W/2+3,121);ctx.fillStyle=C.brightRed;ctx.fillText('SCONFITTA',BASE_W/2,118);}drawCopperBars(126,12);
+
+  ctx.fillStyle=C.navy+'c0';ctx.fillRect(BASE_W/2-200,160,400,200);ctx.strokeStyle=C.copper3;ctx.lineWidth=2;ctx.strokeRect(BASE_W/2-200,160,400,200);
+  ctx.font='8px "Press Start 2P"';const acc=stats.playerShots>0?Math.round(stats.playerHits/stats.playerShots*100):0;const cacc=stats.cpuShots>0?Math.round(stats.cpuHits/stats.cpuShots*100):0;
+  [['COLPI SPARATI:',''+stats.playerShots,C.cyan],['PRECISIONE:',acc+'%',C.cyan],['TURNI:',''+stats.turns,C.cyan],['','',''],['COLPI NEMICO:',''+stats.cpuShots,C.orange],['PRECISIONE NEMICO:',cacc+'%',C.orange]].forEach(([l,v,c],i)=>{if(!l)return;ctx.fillStyle=c;ctx.textAlign='left';ctx.fillText(l,BASE_W/2-180,190+i*28);ctx.textAlign='right';ctx.fillText(v,BASE_W/2+180,190+i*28);});
+
+  drawAmigaBtn(BASE_W/2-200,400,180,36,'RIVINCITA',true);
+  drawAmigaBtn(BASE_W/2+20,400,180,36,'MENU',true);
+  if(mpRematchSent){ctx.font='7px "Press Start 2P"';ctx.textAlign='center';ctx.fillStyle=C.orange;ctx.fillText('RIVINCITA RICHIESTA...',BASE_W/2,450);}
+  drawExplosions();
+}
+
+// ============================================================
+// MULTIPLAYER NETWORK
+// ============================================================
+function connectSocket(){
+  if(socket)return;
+  socket=io();
+
+  socket.on('ROOM_CREATED',({roomCode,playerId})=>{
+    mpRoomCode=roomCode;mpPlayerId=playerId;scene=S.MP_WAIT;mpStatus='';
+  });
+  socket.on('ROOM_JOINED',({roomCode,playerId,opponentName})=>{
+    mpRoomCode=roomCode;mpPlayerId=playerId;mpOpponentName=opponentName;mpStatus='Connesso!';
+  });
+  socket.on('OPPONENT_JOINED',({opponentName})=>{
+    mpOpponentName=opponentName;
+  });
+  socket.on('PHASE_CHANGE',({phase})=>{
+    if(phase==='placement'){
+      mpWaitingShips=false;
+      initGameBoards();
+      scene=S.PLACEMENT;
+    }else if(phase==='battle'){
+      mpWaitingShips=false;
+      scene=S.BATTLE;
+      gameMessage='BATTAGLIA INIZIATA!';messageTimer=120;
+    }
+  });
+  socket.on('SHIPS_ACCEPTED',()=>{
+    mpWaitingShips=true;
+  });
+  socket.on('WAITING_OPPONENT',({message})=>{
+    mpStatus=message;
+  });
+  socket.on('YOUR_TURN',()=>{
+    mpMyTurn=true;
+  });
+  socket.on('ENEMY_TURN',()=>{
+    mpMyTurn=false;
+  });
+  socket.on('FIRE_RESULT',({row,col,result,shipName,shipCells})=>{
+    // Our shot result
+    cpuBoard[row][col].hit=true;
+    stats.playerShots++;stats.turns++;
+    if(result==='miss'){gameMessage='ACQUA!';addSplash(AG_X,GO_Y-10,row,col);sfxSplash();}
+    else if(result==='hit'){cpuBoard[row][col].ship=findOrCreateShipIndex(row,col);gameMessage='COLPITO!';stats.playerHits++;addExplosion(AG_X,GO_Y-10,row,col);sfxHit();}
+    else if(result==='sunk'){stats.playerHits++;gameMessage='COLPITO E AFFONDATO! — '+(shipName||'').toUpperCase();
+      if(shipCells){revealSunkShip(shipCells,shipName);}addExplosion(AG_X,GO_Y-10,row,col);sfxSunk();}
+    messageTimer=100;
+  });
+  socket.on('OPPONENT_FIRED',({row,col,result,shipName,shipCells})=>{
+    playerBoard[row][col].hit=true;
+    stats.cpuShots++;
+    if(result==='miss'){gameMessage='IL NEMICO HA MANCATO!';addSplash(PG_X,GO_Y-10,row,col);sfxSplash();}
+    else if(result==='hit'){gameMessage='IL NEMICO TI HA COLPITO!';stats.cpuHits++;addExplosion(PG_X,GO_Y-10,row,col);sfxHit();}
+    else if(result==='sunk'){gameMessage='IL NEMICO HA AFFONDATO LA TUA '+(shipName||'').toUpperCase()+'!';stats.cpuHits++;
+      // Mark ship as sunk in playerShips
+      if(shipName){const si=playerShips.findIndex(s=>s&&s.name===shipName);if(si!==-1)playerShips[si].hits=playerShips[si].size;}
+      addExplosion(PG_X,GO_Y-10,row,col);sfxSunk();}
+    messageTimer=100;
+  });
+  socket.on('GAME_OVER',({winner:won,opponentShips,stats:serverStats})=>{
+    gameOver=true;winner=won?'player':'cpu';
+    if(serverStats){stats.playerShots=serverStats[mpPlayerId].shots;stats.playerHits=serverStats[mpPlayerId].hits;stats.cpuShots=serverStats[1-mpPlayerId].shots;stats.cpuHits=serverStats[1-mpPlayerId].hits;}
+    // Reveal opponent board
+    if(opponentShips){opponentShips.forEach((cells,si)=>{cells.forEach(({r,c})=>{cpuBoard[r][c].ship=si;});if(!cpuShips[si])cpuShips[si]={...SHIP_DEFS[si],cells,horizontal:cells.length>1?(cells[1].r===cells[0].r):true,hits:SHIP_DEFS[si].size}; else{cpuShips[si].cells=cells;cpuShips[si].horizontal=cells.length>1?(cells[1].r===cells[0].r):true;}});}
+    scene=S.GAMEOVER;gameOverTimer=0;mpRematchSent=false;
+    if(won)sfxVictory();else sfxDefeat();
+  });
+  socket.on('REMATCH_REQUEST',({message})=>{
+    mpStatus=message;
+  });
+  socket.on('OPPONENT_DISCONNECTED',()=>{
+    gameMessage='AVVERSARIO DISCONNESSO!';messageTimer=200;
+    setTimeout(()=>{scene=S.MENU;disconnectSocket();},3000);
+  });
+  socket.on('ERROR',({message})=>{
+    mpStatus=message;sfxError();
+  });
+}
+
+function disconnectSocket(){
+  if(socket){socket.disconnect();socket=null;}
+  mpPlayerId=-1;mpRoomCode='';mpOpponentName='';mpStatus='';mpInputCode='';mpRematchSent=false;
+}
+
+// Helper to manage cpuBoard ship indices in multiplayer
+let mpNextShipSlot=0;
+function findOrCreateShipIndex(r,c){
+  // In MP, we don't know opponent ships until sunk. Use temp indices.
+  if(cpuBoard[r][c].ship!==null)return cpuBoard[r][c].ship;
+  cpuBoard[r][c].ship=99; // temp marker for "hit but unknown ship"
+  return 99;
+}
+function revealSunkShip(cells,shipName){
+  const si=SHIP_DEFS.findIndex(d=>d.name===shipName);
+  if(si===-1)return;
+  cells.forEach(({r,c})=>{cpuBoard[r][c].ship=si;});
+  cpuShips[si]={...SHIP_DEFS[si],cells,horizontal:cells.length>1?(cells[1].r===cells[0].r):true,hits:SHIP_DEFS[si].size};
+}
+
+// ============================================================
+// GAME INIT
+// ============================================================
+function initGameBoards(){
+  playerBoard=createBoard();cpuBoard=createBoard();
+  playerShips=new Array(5).fill(null);
+  cpuShips=gameMode==='single'?randomPlacement(cpuBoard):new Array(5).fill(null).map((_,i)=>({...SHIP_DEFS[i],cells:[],horizontal:true,hits:0}));
+  placementShipIndex=0;placementHorizontal=true;placementConfirmed=false;placedShips=[];
+  gameOver=false;winner='';gameMessage='';messageTimer=0;explosions=[];splashes=[];
+  stats={playerShots:0,playerHits:0,cpuShots:0,cpuHits:0,turns:0};
+  mpWaitingShips=false;mpMyTurn=false;mpRematchSent=false;
+}
+
+function startSinglePlayer(){
+  gameMode='single';initGameBoards();
+  aiMode='hunt';aiTargetStack=[];aiHitChain=[];
+  scene=S.PLACEMENT;
+}
+function startBattle(){
+  currentTurn='player';cpuThinking=false;scene=S.BATTLE;
+  gameMessage='BATTAGLIA INIZIATA! SPARA SULLA GRIGLIA NEMICA!';messageTimer=120;
+}
+
+// ============================================================
+// INPUT HANDLERS
+// ============================================================
+canvas.addEventListener('mousemove',e=>{const r=canvas.getBoundingClientRect();mouseX=(e.clientX-r.left)/scale;mouseY=(e.clientY-r.top)/scale;});
+canvas.addEventListener('contextmenu',e=>{e.preventDefault();if(scene===S.PLACEMENT){placementHorizontal=!placementHorizontal;sfxClick();}});
+
+canvas.addEventListener('click',e=>{
+  initAudio();const r=canvas.getBoundingClientRect(),mx=(e.clientX-r.left)/scale,my=(e.clientY-r.top)/scale;
+  switch(scene){
+    case S.TITLE:if(titleTimer>55){scene=S.MENU;sfxClick();}break;
+    case S.MENU:
+      for(let i=0;i<2;i++){const y=240+i*60;if(my>y-15&&my<y+13){menuSelection=i;sfxClick();
+        if(i===0)scene=S.DIFFICULTY;
+        else if(i===1){gameMode='multi';connectSocket();scene=S.CONNECT;mpConnectSel=0;mpStatus='';mpInputCode='';}break;}}break;
+    case S.DIFFICULTY:
+      for(let i=0;i<3;i++){const y=220+i*80;if(my>y-18&&my<y+32){difficultySelection=i;aiDifficulty=i;sfxClick();startSinglePlayer();break;}}break;
+    case S.CONNECT:handleConnectClick(mx,my);break;
+    case S.MP_WAIT:
+      if(mx>BASE_W/2-70&&mx<BASE_W/2+70&&my>480&&my<512){sfxClick();disconnectSocket();scene=S.MENU;}break;
+    case S.PLACEMENT:handlePlacementClick(mx,my);break;
+    case S.BATTLE:handleBattleClick(mx,my);break;
+    case S.GAMEOVER:
+      if(mx>BASE_W/2-200&&mx<BASE_W/2-20&&my>400&&my<436){sfxClick();
+        if(gameMode==='multi'){if(socket){socket.emit('REMATCH');mpRematchSent=true;}}else startSinglePlayer();}
+      if(mx>BASE_W/2+20&&mx<BASE_W/2+200&&my>400&&my<436){sfxClick();disconnectSocket();scene=S.MENU;}break;
+  }
+});
+
+function handleConnectClick(mx,my){
+  for(let i=0;i<2;i++){const y=180+i*90;if(my>y-18&&my<y+37){if(mpConnectSel!==i)sfxClick();mpConnectSel=i;
+    if(i===0){// Create room
+      if(socket){socket.emit('CREATE_ROOM',{playerName:'Giocatore'});mpStatus='Creazione stanza...';}
+    }
+    break;}}
+  // Join button
+  if(mpConnectSel===1&&mpInputCode.length===4&&mx>BASE_W/2-70&&mx<BASE_W/2+70&&my>460&&my<492){
+    sfxClick();if(socket){socket.emit('JOIN_ROOM',{roomCode:mpInputCode,playerName:'Giocatore'});mpStatus='Connessione...';}
+  }
+  // Back
+  if(mx>20&&mx<140&&my>550&&my<580){sfxClick();disconnectSocket();scene=S.MENU;}
+}
+
+function handlePlacementClick(mx,my){
+  const gox=20,goy=48,btnY=540;
+  if(mx>310&&mx<500&&my>btnY&&my<btnY+32&&!placementConfirmed){sfxPlace();playerBoard=createBoard();placedShips=[];playerShips=randomPlacement(playerBoard);for(let i=0;i<playerShips.length;i++)placedShips[i]=true;placementShipIndex=5;return;}
+  if(mx>520&&mx<710&&my>btnY&&my<btnY+32&&placementShipIndex>=5&&!placementConfirmed){sfxClick();placementConfirmed=true;
+    if(gameMode==='multi'){// Send ships to server
+      const shipsData=playerShips.map((s,i)=>({name:s.name,cells:s.cells}));
+      if(socket)socket.emit('PLACE_SHIPS',{ships:shipsData});
+    }else{startBattle();}return;}
+  if(mx>520&&mx<710&&my>btnY-42&&my<btnY-10&&!placementConfirmed&&placementShipIndex<5){placementHorizontal=!placementHorizontal;sfxClick();return;}
+  if(!placementConfirmed&&placementShipIndex<5){const cell=getGridCell(mx,my,gox,goy);if(cell){if(canPlace(playerBoard,cell.row,cell.col,SHIP_DEFS[placementShipIndex].size,placementHorizontal)){const cells=placeShip(playerBoard,cell.row,cell.col,SHIP_DEFS[placementShipIndex].size,placementHorizontal,placementShipIndex);playerShips[placementShipIndex]={...SHIP_DEFS[placementShipIndex],cells,horizontal:placementHorizontal,hits:0};placedShips[placementShipIndex]=true;placementShipIndex++;sfxPlace();}else sfxError();}}
+}
+
+function handleBattleClick(mx,my){
+  if(gameOver)return;
+  if(gameMode==='single'){
+    if(cpuThinking||currentTurn!=='player')return;
+    const cell=getGridCell(mx,my,AG_X,GO_Y-10);if(!cell)return;if(cpuBoard[cell.row][cell.col].hit){sfxError();return;}
+    const result=fireAt(cpuBoard,cpuShips,cell.row,cell.col);if(!result)return;stats.playerShots++;stats.turns++;
+    if(result.result==='miss'){gameMessage='ACQUA!';addSplash(AG_X,GO_Y-10,cell.row,cell.col);sfxSplash();}
+    else if(result.result==='hit'){gameMessage='COLPITO!';stats.playerHits++;addExplosion(AG_X,GO_Y-10,cell.row,cell.col);sfxHit();}
+    else{gameMessage='COLPITO E AFFONDATO! — '+result.shipName.toUpperCase();stats.playerHits++;addExplosion(AG_X,GO_Y-10,cell.row,cell.col);sfxSunk();}
+    messageTimer=100;
+    if(allSunk(cpuShips)){gameOver=true;winner='player';scene=S.GAMEOVER;gameOverTimer=0;sfxVictory();return;}
+    currentTurn='cpu';cpuThinking=true;cpuThinkTimer=40+Math.floor(Math.random()*25);
+  }else{
+    if(!mpMyTurn)return;
+    const cell=getGridCell(mx,my,AG_X,GO_Y-10);if(!cell)return;if(cpuBoard[cell.row][cell.col].hit){sfxError();return;}
+    mpMyTurn=false; // Prevent double clicks
+    if(socket)socket.emit('FIRE',{row:cell.row,col:cell.col});
+  }
+}
+
+// Keyboard input
+document.addEventListener('keydown',e=>{
+  initAudio();
+  if(scene===S.PLACEMENT){if(e.key==='r'||e.key==='R'){placementHorizontal=!placementHorizontal;sfxClick();}if(e.key==='z'||e.key==='Z'){if(placementShipIndex>0&&!placementConfirmed){placementShipIndex--;removeShip(playerBoard,placementShipIndex);delete placedShips[placementShipIndex];playerShips[placementShipIndex]=null;sfxClick();}}}
+  if(scene===S.MENU){if(e.key==='ArrowUp'){menuSelection=Math.max(0,menuSelection-1);sfxClick();}if(e.key==='ArrowDown'){menuSelection=Math.min(1,menuSelection+1);sfxClick();}if(e.key==='Enter'){if(menuSelection===0){scene=S.DIFFICULTY;sfxClick();}else{gameMode='multi';connectSocket();scene=S.CONNECT;mpConnectSel=0;mpStatus='';mpInputCode='';sfxClick();}}}
+  if(scene===S.DIFFICULTY){if(e.key==='ArrowUp'){difficultySelection=Math.max(0,difficultySelection-1);sfxClick();}if(e.key==='ArrowDown'){difficultySelection=Math.min(2,difficultySelection+1);sfxClick();}if(e.key==='Enter'){aiDifficulty=difficultySelection;sfxClick();startSinglePlayer();}}
+  // Room code input
+  if(scene===S.CONNECT&&mpConnectSel===1){
+    if(e.key==='Backspace'){mpInputCode=mpInputCode.slice(0,-1);}
+    else if(e.key.length===1&&/[0-9]/.test(e.key)&&mpInputCode.length<4){mpInputCode+=e.key;sfxClick();}
+  }
+});
+
+// --- CPU TURN (single player only) ---
+function cpuTurn(){
+  const{row,col}=cpuFire();const result=fireAt(playerBoard,playerShips,row,col);stats.cpuShots++;
+  if(result.result==='miss'){gameMessage='IL NEMICO HA MANCATO!';addSplash(PG_X,GO_Y-10,row,col);sfxSplash();}
+  else if(result.result==='hit'){gameMessage='IL NEMICO TI HA COLPITO!';stats.cpuHits++;addExplosion(PG_X,GO_Y-10,row,col);sfxHit();}
+  else{gameMessage='IL NEMICO HA AFFONDATO LA TUA '+result.shipName.toUpperCase()+'!';stats.cpuHits++;addExplosion(PG_X,GO_Y-10,row,col);sfxSunk();}
+  cpuProcessResult(row,col,result);messageTimer=100;
+  if(allSunk(playerShips)){gameOver=true;winner='cpu';scene=S.GAMEOVER;gameOverTimer=0;sfxDefeat();return;}
+  currentTurn='player';
+}
+
+// --- MAIN LOOP ---
+function gameLoop(){
+  animFrame++;
+  if(gameMode==='single'&&cpuThinking&&scene===S.BATTLE){cpuThinkTimer--;if(cpuThinkTimer<=0){cpuThinking=false;cpuTurn();}}
+  ctx.fillStyle=C.black;ctx.fillRect(0,0,BASE_W,BASE_H);
+  switch(scene){
+    case S.TITLE:drawTitle();break;case S.MENU:drawMenu();break;case S.DIFFICULTY:drawDifficulty();break;
+    case S.CONNECT:drawConnect();break;case S.MP_WAIT:drawMpWait();break;
+    case S.PLACEMENT:drawPlacement();break;case S.BATTLE:drawBattle();break;case S.GAMEOVER:drawGameOver();break;
+  }
+  requestAnimationFrame(gameLoop);
+}
+gameLoop();
+</script>
+</body>
+</html>
