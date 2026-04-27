@@ -22,22 +22,17 @@ Giocatore Singolo contro CPU + Multiplayer online.
 
 ## 🌐 COME METTERE ONLINE (GRATIS) — Render.com
 
-### Passo 1: Crea un account GitHub
-- Vai su https://github.com e registrati (gratis)
-- Crea un nuovo repository (es. "battaglia-navale")
-- Carica tutti i file del progetto nel repository
+Il repo include un **Blueprint** (`render.yaml`) che configura tutto automaticamente.
 
-### Passo 2: Deploy su Render
-1. Vai su https://render.com e registrati con GitHub
-2. Clicca **"New +"** → **"Web Service"**
-3. Collega il tuo repository GitHub
-4. Configura:
-   - **Name:** battaglia-navale
-   - **Runtime:** Node
-   - **Build Command:** `npm install`
-   - **Start Command:** `npm start`
-   - **Instance Type:** Free
-5. Clicca **"Deploy"**
+1. Vai su https://render.com e accedi con GitHub
+2. **New +** → **Blueprint**
+3. Seleziona il repo `battaglia-navale` (o incolla l'URL)
+4. Render legge `render.yaml` e crea il servizio (free tier, Node 20)
+5. **Apply** → primo build ~2 min → ti dà un URL pubblico
+
+Da quel momento ogni `git push` su `main` rideploya automaticamente.
+
+> **Nota free tier**: il servizio dorme dopo ~15 min senza traffico. La prima richiesta dopo il sonno impiega ~30 s a svegliarlo.
 
 ### Passo 3: Gioca!
 - Render ti darà un indirizzo tipo: `https://battaglia-navale-xxxx.onrender.com`

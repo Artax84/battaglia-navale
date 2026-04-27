@@ -1,0 +1,17 @@
+# Render.com Blueprint — deploy in 1 click.
+# Vai su https://render.com → New → Blueprint → connetti questo repo.
+# Render legge questo file e crea il servizio automaticamente.
+services:
+  - type: web
+    name: battaglia-navale
+    runtime: node
+    plan: free
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    autoDeploy: true
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "20"
