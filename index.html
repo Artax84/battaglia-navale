@@ -2,7 +2,12 @@
 <html lang="it">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#ff10f0">
+<meta name="description" content="Battaglia Navale Retrowave Edition — single + multiplayer in stile anni 80, neon synthwave, Top Gun e Amiga 600.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="apple-touch-icon" href="icon.svg">
 <title>Battaglia Navale — © Girolamo Artale</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=Orbitron:wght@400;700;900&display=swap');
@@ -36,6 +41,17 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;curso
   <button type="button" data-action="mute">Muto (M)</button>
 </div>
 <script src="/socket.io/socket.io.js"></script>
+<script>
+// Register service worker (PWA offline single-player). Skip on insecure non-localhost.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    const isLocal = ['localhost','127.0.0.1','::1'].indexOf(location.hostname) !== -1;
+    if (location.protocol === 'https:' || isLocal) {
+      navigator.serviceWorker.register('sw.js').catch(() => {/* offline mode unavailable */});
+    }
+  });
+}
+</script>
 <script>
 // ============================================================
 // BATTAGLIA NAVALE — © Girolamo Artale

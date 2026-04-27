@@ -4,11 +4,16 @@
   "description": "Battaglia Navale — © Girolamo Artale — Multiplayer & Single Player",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test:e2e": "node test-e2e.js",
+    "check": "node --check server.js && node --check sw.js"
   },
   "dependencies": {
     "express": "^4.21.0",
     "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.7.5"
   },
   "engines": {
     "node": ">=18.0.0"

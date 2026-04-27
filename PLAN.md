@@ -161,4 +161,5 @@ Split di `index.html` nei moduli `src/*` come da architettura sopra. Niente regr
 - [x] Fase 8: AI shuffle (Fisher-Yates dei vicini iniziali in cpuProcessResult)
 - [x] Fase 9: Settings + localStorage (volumi, mute, lastDifficulty, stats: best turns, V/S single+multi)
 - [x] Fase 10: Performance (visibility pause, cap esplosioni/splashes a 40, RAF cancel su tab hidden)
-- [ ] Fase 11: PWA offline (rimasta NICE-TO-HAVE non urgente)
+- [x] Fase 11: PWA offline (manifest.webmanifest + sw.js network-first per nav, cache-first asset+font, mai socket.io; icon.svg + icon-maskable.svg)
+- [x] E2E smoke multiplayer (test-e2e.js): partita completa A vince B, trim room code, server rifiuta navi diagonalmente adiacenti
