@@ -151,12 +151,14 @@ Split di `index.html` nei moduli `src/*` come da architettura sopra. Niente regr
 ## Status
 
 - [x] Fase 0: Analisi e architettura
-- [ ] Fase 1: Bugfix critici client
-- [ ] Fase 2: Bugfix backend
-- [ ] Fase 3: Refactor moduli
-- [ ] Fase 4: Estetica retrowave
-- [ ] Fase 5: Audio retrowave
-- [ ] Fase 6: Responsive + touch
-- [ ] Fase 7: Accessibilità
-- [ ] Fase 8: AI shuffle
-- [ ] Fase 9-11: NICE-TO-HAVE
+- [x] Fase 1: Bugfix critici client
+- [x] Fase 2: Bugfix backend
+- [~] Fase 3: Refactor moduli (rimandato — rimasto monolitico per non rompere deploy Render; codice ora ben sezionato)
+- [x] Fase 4: Estetica retrowave (synthwave grid, sole, montagne, scanlines, CRT, neon glow, jet flyby, copper retrowave, jet HUD crosshair)
+- [x] Fase 5: Audio retrowave (master/music/sfx bus, reverb procedurale, lo-fi pad Am7 con LFO, mute/volumi separati)
+- [x] Fase 6: Responsive (visualViewport + dvh + integer scale) + touch (tap, long-press 500ms = ruota nave)
+- [x] Fase 7: Accessibilità (aria-live, bottoni DOM speculari focusable, M=mute, Esc=indietro, prefers-reduced-motion, annunci coordinate ABCDEFGHIJ+riga)
+- [x] Fase 8: AI shuffle (Fisher-Yates dei vicini iniziali in cpuProcessResult)
+- [x] Fase 9: Settings + localStorage (volumi, mute, lastDifficulty, stats: best turns, V/S single+multi)
+- [x] Fase 10: Performance (visibility pause, cap esplosioni/splashes a 40, RAF cancel su tab hidden)
+- [ ] Fase 11: PWA offline (rimasta NICE-TO-HAVE non urgente)
