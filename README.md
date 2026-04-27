@@ -1,9 +1,17 @@
 # 🚢 BATTAGLIA NAVALE
 
-**© Girolamo Artale**
+**© Girolamo Artale** — Retrowave Edition
 
-Gioco della Battaglia Navale con grafica stile Amiga 500.
-Giocatore Singolo contro CPU + Multiplayer online.
+Gioco della Battaglia Navale in stile anni 80 (synthwave + Top Gun + Amiga 600).
+Giocatore Singolo contro CPU (3 livelli di difficoltà) + Multiplayer online.
+
+## 🚀 GIOCA SUBITO (1 click)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Artax84/battaglia-navale)
+
+Clicca il pulsante qui sopra → login con GitHub → **Apply** → attendi ~2 minuti
+→ Render ti dà un URL pubblico tipo `https://battaglia-navale-xxxx.onrender.com`.
+Quello è il tuo gioco: aprilo e gioca, condividilo per il multiplayer.
 
 ---
 
