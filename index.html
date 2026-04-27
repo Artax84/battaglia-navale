@@ -8,7 +8,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh;overflow:hidden;font-family:'Press Start 2P',monospace}
-canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;cursor:crosshair}
+canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;cursor:default}
 #gameCanvas{max-width:100vw;max-height:100vh}
 #roomInput{position:fixed;top:-200px;left:-200px;opacity:0;font-size:24px;width:120px;text-align:center;font-family:'Press Start 2P',monospace}
 </style>
@@ -98,6 +98,7 @@ let animFrame=0;
 let explosions=[],splashes=[];
 let shakeTimer=0,shakeX=0,shakeY=0;
 let cpuThinking=false,cpuThinkTimer=0;
+let playerFiredThisTurn=false; // single-player anti double-click guard
 
 const GO_Y=90,PG_X=20,AG_X=425,LBL=18;
 
@@ -112,14 +113,15 @@ let mpStatus='';
 let mpInputCode='';
 let mpInputActive=false;
 let mpMyTurn=false;
+let mpFireInFlight=false; // multiplayer: true while waiting for FIRE_RESULT
 let mpWaitingShips=false;
 let mpRevealedShips=null; // opponent ships after game over
 let mpRematchSent=false;
 
 // --- AUDIO ---
 let audioCtx=null;
-function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();}
-function playTone(f,d,t='square',v=0.06){if(!audioCtx)return;const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type=t;o.frequency.value=f;g.gain.setValueAtTime(v,audioCtx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+d);}
+function initAudio(){if(audioCtx)return;try{const Ctx=window.AudioContext||window.webkitAudioContext;if(!Ctx)return;audioCtx=new Ctx();}catch(e){console.warn('Audio non disponibile:',e);audioCtx=null;}}
+function playTone(f,d,t='square',v=0.06){if(!audioCtx)return;try{const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type=t;o.frequency.value=f;g.gain.setValueAtTime(v,audioCtx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+d);}catch(e){/* silently ignore */}}
 function sfxClick(){playTone(880,0.04,'square',0.05);}
 function sfxPlace(){playTone(660,0.06,'square',0.05);setTimeout(()=>playTone(990,0.08,'square',0.04),40);}
 function sfxSplash(){playTone(180,0.3,'triangle',0.06);playTone(120,0.4,'sine',0.04);}
@@ -139,6 +141,7 @@ function allSunk(ships){return ships.every(s=>s.hits>=s.size);}
 function fireAt(b,ships,r,c){if(b[r][c].hit)return null;b[r][c].hit=true;const si=b[r][c].ship;if(si!==null){ships[si].hits++;if(ships[si].hits>=ships[si].size)return{result:'sunk',shipIndex:si,shipName:ships[si].name};return{result:'hit'};}return{result:'miss'};}
 
 // --- CPU AI ---
+function shuffleInPlace(arr){for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}return arr;}
 function cpuFire(){
   if(aiDifficulty===0){let r,c;do{r=Math.floor(Math.random()*10);c=Math.floor(Math.random()*10);}while(playerBoard[r][c].hit);return{row:r,col:c};}
   if(aiMode==='target'&&aiTargetStack.length>0){while(aiTargetStack.length>0){const t=aiTargetStack.pop();if(t.r>=0&&t.r<10&&t.c>=0&&t.c<10&&!playerBoard[t.r][t.c].hit)return{row:t.r,col:t.c};}aiMode='hunt';aiHitChain=[];}
@@ -147,7 +150,7 @@ function cpuFire(){
   if(playerBoard[r][c].hit){for(let rr=0;rr<10;rr++)for(let cc=0;cc<10;cc++)if(!playerBoard[rr][cc].hit)return{row:rr,col:cc};}return{row:r,col:c};
 }
 function cpuFireHard(){const prob=Array.from({length:10},()=>Array(10).fill(0));const sizes=playerShips.filter(s=>s.hits<s.size).map(s=>s.size);for(const sz of sizes){for(let r=0;r<10;r++)for(let c=0;c<=10-sz;c++){let ok=true,unk=false;for(let i=0;i<sz;i++){if(playerBoard[r][c+i].hit&&playerBoard[r][c+i].ship===null){ok=false;break;}if(!playerBoard[r][c+i].hit)unk=true;}if(ok&&unk)for(let i=0;i<sz;i++)if(!playerBoard[r][c+i].hit)prob[r][c+i]++;}for(let r=0;r<=10-sz;r++)for(let c=0;c<10;c++){let ok=true,unk=false;for(let i=0;i<sz;i++){if(playerBoard[r+i][c].hit&&playerBoard[r+i][c].ship===null){ok=false;break;}if(!playerBoard[r+i][c].hit)unk=true;}if(ok&&unk)for(let i=0;i<sz;i++)if(!playerBoard[r+i][c].hit)prob[r+i][c]++;}}let mx=0,best=[];for(let r=0;r<10;r++)for(let c=0;c<10;c++){if(playerBoard[r][c].hit)continue;if(prob[r][c]>mx){mx=prob[r][c];best=[{r,c}];}else if(prob[r][c]===mx)best.push({r,c});}if(!best.length){for(let r=0;r<10;r++)for(let c=0;c<10;c++)if(!playerBoard[r][c].hit)return{row:r,col:c};}const p=best[Math.floor(Math.random()*best.length)];return{row:p.r,col:p.c};}
-function cpuProcessResult(row,col,result){if(result.result==='hit'){aiMode='target';aiHitChain.push({r:row,c:col});if(aiHitChain.length>=2){const dr=aiHitChain[aiHitChain.length-1].r-aiHitChain[aiHitChain.length-2].r,dc=aiHitChain[aiHitChain.length-1].c-aiHitChain[aiHitChain.length-2].c;aiTargetStack=[];let fr=row+dr,fc=col+dc;if(fr>=0&&fr<10&&fc>=0&&fc<10&&!playerBoard[fr][fc].hit)aiTargetStack.push({r:fr,c:fc});let br=aiHitChain[0].r-dr,bc=aiHitChain[0].c-dc;if(br>=0&&br<10&&bc>=0&&bc<10&&!playerBoard[br][bc].hit)aiTargetStack.push({r:br,c:bc});}else{[[-1,0],[1,0],[0,-1],[0,1]].forEach(([dr,dc])=>{const nr=row+dr,nc=col+dc;if(nr>=0&&nr<10&&nc>=0&&nc<10&&!playerBoard[nr][nc].hit)aiTargetStack.push({r:nr,c:nc});});}}else if(result.result==='sunk'){aiMode='hunt';aiTargetStack=[];aiHitChain=[];}}
+function cpuProcessResult(row,col,result){if(result.result==='hit'){aiMode='target';aiHitChain.push({r:row,c:col});if(aiHitChain.length>=2){const dr=aiHitChain[aiHitChain.length-1].r-aiHitChain[aiHitChain.length-2].r,dc=aiHitChain[aiHitChain.length-1].c-aiHitChain[aiHitChain.length-2].c;aiTargetStack=[];let fr=row+dr,fc=col+dc;if(fr>=0&&fr<10&&fc>=0&&fc<10&&!playerBoard[fr][fc].hit)aiTargetStack.push({r:fr,c:fc});let br=aiHitChain[0].r-dr,bc=aiHitChain[0].c-dc;if(br>=0&&br<10&&bc>=0&&bc<10&&!playerBoard[br][bc].hit)aiTargetStack.push({r:br,c:bc});}else{const dirs=shuffleInPlace([[-1,0],[1,0],[0,-1],[0,1]]);dirs.forEach(([dr,dc])=>{const nr=row+dr,nc=col+dc;if(nr>=0&&nr<10&&nc>=0&&nc<10&&!playerBoard[nr][nc].hit)aiTargetStack.push({r:nr,c:nc});});}}else if(result.result==='sunk'){aiMode='hunt';aiTargetStack=[];aiHitChain=[];}}
 
 // --- WATER ---
 const waterFrames=[];
@@ -388,9 +391,12 @@ function drawGameOver(){
 // ============================================================
 // MULTIPLAYER NETWORK
 // ============================================================
+const MP_EVENTS=['ROOM_CREATED','ROOM_JOINED','OPPONENT_JOINED','PHASE_CHANGE','SHIPS_ACCEPTED','WAITING_OPPONENT','YOUR_TURN','ENEMY_TURN','FIRE_RESULT','OPPONENT_FIRED','GAME_OVER','REMATCH_REQUEST','OPPONENT_DISCONNECTED','ERROR'];
 function connectSocket(){
   if(socket)return;
   socket=io();
+  // Defensive: clear any prior listeners (in case of re-connect on same socket instance)
+  MP_EVENTS.forEach(ev=>socket.off(ev));
 
   socket.on('ROOM_CREATED',({roomCode,playerId})=>{
     mpRoomCode=roomCode;mpPlayerId=playerId;scene=S.MP_WAIT;mpStatus='';
@@ -425,7 +431,9 @@ function connectSocket(){
     mpMyTurn=false;
   });
   socket.on('FIRE_RESULT',({row,col,result,shipName,shipCells})=>{
-    // Our shot result
+    // Our shot result — clear in-flight guard so future turns can fire
+    mpFireInFlight=false;
+    if(!cpuBoard||!cpuBoard[row]||!cpuBoard[row][col])return;
     cpuBoard[row][col].hit=true;
     stats.playerShots++;stats.turns++;
     if(result==='miss'){gameMessage='ACQUA!';addSplash(AG_X,GO_Y-10,row,col);sfxSplash();}
@@ -441,7 +449,7 @@ function connectSocket(){
     else if(result==='hit'){gameMessage='IL NEMICO TI HA COLPITO!';stats.cpuHits++;addExplosion(PG_X,GO_Y-10,row,col);sfxHit();}
     else if(result==='sunk'){gameMessage='IL NEMICO HA AFFONDATO LA TUA '+(shipName||'').toUpperCase()+'!';stats.cpuHits++;
       // Mark ship as sunk in playerShips
-      if(shipName){const si=playerShips.findIndex(s=>s&&s.name===shipName);if(si!==-1)playerShips[si].hits=playerShips[si].size;}
+      if(shipName&&playerShips){const si=playerShips.findIndex(s=>s&&s.name===shipName);if(si!==-1&&playerShips[si])playerShips[si].hits=playerShips[si].size;}
       addExplosion(PG_X,GO_Y-10,row,col);sfxSunk();}
     messageTimer=100;
   });
@@ -462,26 +470,32 @@ function connectSocket(){
   });
   socket.on('ERROR',({message})=>{
     mpStatus=message;sfxError();
+    // Server rejected our action — release any in-flight fire so player can act again
+    mpFireInFlight=false;
+    if(messageTimer<=0){gameMessage=(message||'').toUpperCase();messageTimer=120;}
   });
 }
 
 function disconnectSocket(){
-  if(socket){socket.disconnect();socket=null;}
+  if(socket){MP_EVENTS.forEach(ev=>socket.off(ev));try{socket.removeAllListeners&&socket.removeAllListeners();}catch(e){}socket.disconnect();socket=null;}
   mpPlayerId=-1;mpRoomCode='';mpOpponentName='';mpStatus='';mpInputCode='';mpRematchSent=false;
+  mpMyTurn=false;mpFireInFlight=false;mpWaitingShips=false;
 }
 
 // Helper to manage cpuBoard ship indices in multiplayer
-let mpNextShipSlot=0;
 function findOrCreateShipIndex(r,c){
   // In MP, we don't know opponent ships until sunk. Use temp indices.
+  if(!cpuBoard||!cpuBoard[r]||!cpuBoard[r][c])return 99;
   if(cpuBoard[r][c].ship!==null)return cpuBoard[r][c].ship;
   cpuBoard[r][c].ship=99; // temp marker for "hit but unknown ship"
   return 99;
 }
 function revealSunkShip(cells,shipName){
+  if(!cells||!cells.length||!shipName)return;
   const si=SHIP_DEFS.findIndex(d=>d.name===shipName);
-  if(si===-1)return;
-  cells.forEach(({r,c})=>{cpuBoard[r][c].ship=si;});
+  if(si===-1||si>=SHIP_DEFS.length)return;
+  if(!cpuBoard||!cpuShips)return;
+  cells.forEach(({r,c})=>{if(cpuBoard[r]&&cpuBoard[r][c])cpuBoard[r][c].ship=si;});
   cpuShips[si]={...SHIP_DEFS[si],cells,horizontal:cells.length>1?(cells[1].r===cells[0].r):true,hits:SHIP_DEFS[si].size};
 }
 
@@ -495,7 +509,10 @@ function initGameBoards(){
   placementShipIndex=0;placementHorizontal=true;placementConfirmed=false;placedShips=[];
   gameOver=false;winner='';gameMessage='';messageTimer=0;explosions=[];splashes=[];
   stats={playerShots:0,playerHits:0,cpuShots:0,cpuHits:0,turns:0};
-  mpWaitingShips=false;mpMyTurn=false;mpRematchSent=false;
+  mpWaitingShips=false;mpMyTurn=false;mpFireInFlight=false;mpRematchSent=false;
+  currentTurn='player';cpuThinking=false;cpuThinkTimer=0;playerFiredThisTurn=false;
+  aiMode='hunt';aiTargetStack=[];aiHitChain=[];
+  shakeTimer=0;shakeX=0;shakeY=0;
 }
 
 function startSinglePlayer(){
@@ -544,7 +561,7 @@ function handleConnectClick(mx,my){
     break;}}
   // Join button
   if(mpConnectSel===1&&mpInputCode.length===4&&mx>BASE_W/2-70&&mx<BASE_W/2+70&&my>460&&my<492){
-    sfxClick();if(socket){socket.emit('JOIN_ROOM',{roomCode:mpInputCode,playerName:'Giocatore'});mpStatus='Connessione...';}
+    sfxClick();if(socket){const code=(mpInputCode||'').trim().toUpperCase();socket.emit('JOIN_ROOM',{roomCode:code,playerName:'Giocatore'});mpStatus='Connessione...';}
   }
   // Back
   if(mx>20&&mx<140&&my>550&&my<580){sfxClick();disconnectSocket();scene=S.MENU;}
@@ -565,9 +582,10 @@ function handlePlacementClick(mx,my){
 function handleBattleClick(mx,my){
   if(gameOver)return;
   if(gameMode==='single'){
-    if(cpuThinking||currentTurn!=='player')return;
+    if(cpuThinking||currentTurn!=='player'||playerFiredThisTurn)return;
     const cell=getGridCell(mx,my,AG_X,GO_Y-10);if(!cell)return;if(cpuBoard[cell.row][cell.col].hit){sfxError();return;}
-    const result=fireAt(cpuBoard,cpuShips,cell.row,cell.col);if(!result)return;stats.playerShots++;stats.turns++;
+    playerFiredThisTurn=true; // lock until CPU resolves
+    const result=fireAt(cpuBoard,cpuShips,cell.row,cell.col);if(!result){playerFiredThisTurn=false;return;}stats.playerShots++;stats.turns++;
     if(result.result==='miss'){gameMessage='ACQUA!';addSplash(AG_X,GO_Y-10,cell.row,cell.col);sfxSplash();}
     else if(result.result==='hit'){gameMessage='COLPITO!';stats.playerHits++;addExplosion(AG_X,GO_Y-10,cell.row,cell.col);sfxHit();}
     else{gameMessage='COLPITO E AFFONDATO! — '+result.shipName.toUpperCase();stats.playerHits++;addExplosion(AG_X,GO_Y-10,cell.row,cell.col);sfxSunk();}
@@ -575,9 +593,9 @@ function handleBattleClick(mx,my){
     if(allSunk(cpuShips)){gameOver=true;winner='player';scene=S.GAMEOVER;gameOverTimer=0;sfxVictory();return;}
     currentTurn='cpu';cpuThinking=true;cpuThinkTimer=40+Math.floor(Math.random()*25);
   }else{
-    if(!mpMyTurn)return;
+    if(!mpMyTurn||mpFireInFlight)return;
     const cell=getGridCell(mx,my,AG_X,GO_Y-10);if(!cell)return;if(cpuBoard[cell.row][cell.col].hit){sfxError();return;}
-    mpMyTurn=false; // Prevent double clicks
+    mpFireInFlight=true; // wait for FIRE_RESULT before allowing another shot
     if(socket)socket.emit('FIRE',{row:cell.row,col:cell.col});
   }
 }
@@ -603,13 +621,24 @@ function cpuTurn(){
   else{gameMessage='IL NEMICO HA AFFONDATO LA TUA '+result.shipName.toUpperCase()+'!';stats.cpuHits++;addExplosion(PG_X,GO_Y-10,row,col);sfxSunk();}
   cpuProcessResult(row,col,result);messageTimer=100;
   if(allSunk(playerShips)){gameOver=true;winner='cpu';scene=S.GAMEOVER;gameOverTimer=0;sfxDefeat();return;}
-  currentTurn='player';
+  currentTurn='player';playerFiredThisTurn=false;
 }
 
 // --- MAIN LOOP ---
+function updateCursor(){
+  let c='default';
+  if(scene===S.MENU||scene===S.DIFFICULTY||scene===S.CONNECT||scene===S.MP_WAIT||scene===S.GAMEOVER||scene===S.TITLE)c='pointer';
+  else if(scene===S.PLACEMENT)c=placementConfirmed?'default':'crosshair';
+  else if(scene===S.BATTLE){
+    const canShoot=gameMode==='single'?(currentTurn==='player'&&!cpuThinking&&!playerFiredThisTurn):(mpMyTurn&&!mpFireInFlight);
+    c=gameOver?'default':(canShoot?'crosshair':'wait');
+  }
+  if(canvas.style.cursor!==c)canvas.style.cursor=c;
+}
 function gameLoop(){
   animFrame++;
   if(gameMode==='single'&&cpuThinking&&scene===S.BATTLE){cpuThinkTimer--;if(cpuThinkTimer<=0){cpuThinking=false;cpuTurn();}}
+  updateCursor();
   ctx.fillStyle=C.black;ctx.fillRect(0,0,BASE_W,BASE_H);
   switch(scene){
     case S.TITLE:drawTitle();break;case S.MENU:drawMenu();break;case S.DIFFICULTY:drawDifficulty();break;
