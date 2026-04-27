@@ -1,9 +1,17 @@
 # 🚢 BATTAGLIA NAVALE
 
-**© Girolamo Artale**
+**© Girolamo Artale** — Retrowave Edition
 
-Gioco della Battaglia Navale con grafica stile Amiga 500.
-Giocatore Singolo contro CPU + Multiplayer online.
+Gioco della Battaglia Navale in stile anni 80 (synthwave + Top Gun + Amiga 600).
+Giocatore Singolo contro CPU (3 livelli di difficoltà) + Multiplayer online.
+
+## 🚀 GIOCA SUBITO (1 click)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Artax84/battaglia-navale)
+
+Clicca il pulsante qui sopra → login con GitHub → **Apply** → attendi ~2 minuti
+→ Render ti dà un URL pubblico tipo `https://battaglia-navale-xxxx.onrender.com`.
+Quello è il tuo gioco: aprilo e gioca, condividilo per il multiplayer.
 
 ---
 
@@ -22,22 +30,17 @@ Giocatore Singolo contro CPU + Multiplayer online.
 
 ## 🌐 COME METTERE ONLINE (GRATIS) — Render.com
 
-### Passo 1: Crea un account GitHub
-- Vai su https://github.com e registrati (gratis)
-- Crea un nuovo repository (es. "battaglia-navale")
-- Carica tutti i file del progetto nel repository
+Il repo include un **Blueprint** (`render.yaml`) che configura tutto automaticamente.
 
-### Passo 2: Deploy su Render
-1. Vai su https://render.com e registrati con GitHub
-2. Clicca **"New +"** → **"Web Service"**
-3. Collega il tuo repository GitHub
-4. Configura:
-   - **Name:** battaglia-navale
-   - **Runtime:** Node
-   - **Build Command:** `npm install`
-   - **Start Command:** `npm start`
-   - **Instance Type:** Free
-5. Clicca **"Deploy"**
+1. Vai su https://render.com e accedi con GitHub
+2. **New +** → **Blueprint**
+3. Seleziona il repo `battaglia-navale` (o incolla l'URL)
+4. Render legge `render.yaml` e crea il servizio (free tier, Node 20)
+5. **Apply** → primo build ~2 min → ti dà un URL pubblico
+
+Da quel momento ogni `git push` su `main` rideploya automaticamente.
+
+> **Nota free tier**: il servizio dorme dopo ~15 min senza traffico. La prima richiesta dopo il sonno impiega ~30 s a svegliarlo.
 
 ### Passo 3: Gioca!
 - Render ti darà un indirizzo tipo: `https://battaglia-navale-xxxx.onrender.com`
